@@ -39,6 +39,7 @@ class NeuralNetwork:
         using only the default autograd package of PyTorch
     """
 
+    @property
     def __generate_weights(self):
         """ private helper for generating network weights """
 
@@ -112,7 +113,7 @@ class NeuralNetwork:
         self.lr = learning_rate
 
         # create weights for the network
-        self.weights, self.biases = self.__generate_weights()
+        self.weights, self.biases = self.__generate_weights
 
         # create a state var for current loss (cache for backpropagation)
         self.loss = None
