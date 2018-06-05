@@ -1,0 +1,3 @@
+# ignore the saved_models and the generated videos
+Out/
+Saved_Models/

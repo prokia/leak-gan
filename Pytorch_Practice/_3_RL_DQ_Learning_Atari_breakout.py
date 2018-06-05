@@ -103,7 +103,7 @@ class Agent:
     """ The agent for the RL environment """
 
     def __init__(self, q_net, t_net, memory, batch_size=128, gamma=0.999,
-                 eps_start=0.9, eps_end=0.05, eps_decay=300, target_update=12,
+                 eps_start=0.9, eps_end=0.05, eps_decay=210000, target_update=12,
                  learning_rate=0.01, clip_value=3):
         """
         constructor for the class
@@ -132,12 +132,12 @@ class Agent:
         # create an optimizer for the Agent
         self.optimizer = th.optim.RMSprop(self.q_net.parameters())
 
-    def select_action(self, state, deterministic=False):
+    def select_action(self, state):
         sample = random.random()
         eps_threshold = (self.eps_end + (self.eps_start - self.eps_end) *
                          np.exp(-1. * self.steps_done / self.eps_decay))
         self.steps_done += 1
-        if sample > eps_threshold or deterministic:
+        if sample > eps_threshold:
             with th.no_grad():
                 return self.q_net(state).max(1)[1].view(1, 1)
         else:
@@ -234,9 +234,15 @@ def preprocess_frame(observation):
     return nor
 
 
-def play_one_episode(agent, env, inverse_speed=0.05):
+def play_one_episode(agent, env, render=False, inverse_speed=0.05, save_dir="./Out"):
+    # apply the monitor if render is false
+    if not render:
+        work_env = gym.wrappers.Monitor(env, directory=save_dir, resume=True)
+    else:
+        work_env = env
+
     # play and render one episode:
-    current_screen = expand_and_convert(preprocess_frame(env.reset()))
+    current_screen = expand_and_convert(preprocess_frame(work_env.reset()))
     last_screen = th.zeros_like(current_screen, device=device, dtype=th.float)
 
     state = subtract_scaled_frames(last_screen, current_screen)
@@ -244,20 +250,21 @@ def play_one_episode(agent, env, inverse_speed=0.05):
     done = False
 
     while not done:
-        action = agent.select_action(state, deterministic=False)
-        obs, _, done, _ = env.step(action.item())
+        action = agent.select_action(state)
+        obs, _, done, _ = work_env.step(action.item())
 
         last_screen = current_screen
         current_screen = expand_and_convert(preprocess_frame(obs))
 
         state = subtract_scaled_frames(last_screen, current_screen)
 
-        env.render()
+        if render:
+            work_env.render()
         time.sleep(inverse_speed)
 
 
-def train_agent(agent, env, num_episodes=100, feed_back_factor=10,
-                save_after=30, save_dir="./Saved_Models"):
+def train_agent(agent, env, num_episodes=100, feed_back_factor=100,
+                save_after=100, save_dir="./Saved_Models", save=True):
     from itertools import count
 
     # start the training loop:
@@ -302,11 +309,14 @@ def train_agent(agent, env, num_episodes=100, feed_back_factor=10,
 
         if i_episode % feed_back_factor == 0 or i_episode == 0:
             # play an episode for viewing
-            play_one_episode(agent, env)
+            play_one_episode(agent, env, render=not save)
 
         # save the model
         if i_episode % save_after == 0 or i_episode == 0:
             print("Saving Model ... ")
+            with open(os.path.join(save_dir, "Checkpoint"), 'w') as chkp:
+                chkp.write("total_episodes: " + str(i_episode + 1) + "\n")
+                chkp.write("total_steps: " + str(agent.steps_done) + "\n")
             th.save(agent.q_net, os.path.join(save_dir, "Model"+str(i_episode+1)+".pth"),
                     pickle)
 
@@ -349,7 +359,7 @@ def main(args):
     agent = Agent(q_network, target_network, ReplayMemory(10000), batch_size=256)
 
     # train the agent
-    train_agent(agent, env, num_episodes=1200)
+    train_agent(agent, env, num_episodes=21000)
 
     env.close()
 
