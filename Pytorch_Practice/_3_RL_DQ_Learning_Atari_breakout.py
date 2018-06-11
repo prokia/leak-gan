@@ -4,15 +4,15 @@
 """
 
 import argparse
-import numpy as np
-import torch as th
-import time
-import random
-import gym
 import os
 import pickle
-
+import random
 from collections import namedtuple
+
+import cv2
+import gym
+import numpy as np
+import torch as th
 
 # Set the global Constants for the script
 device = th.device("cuda" if th.cuda.is_available() else "cpu")
@@ -64,17 +64,17 @@ class DQN(th.nn.Module):
         self.num_actions = num_actions
 
         # define the modules needed for the network:
-        from torch.nn import Conv2d, BatchNorm2d
+        from torch.nn import Conv2d, ReLU, Sequential
 
-        self.conv1 = Conv2d(self.channels, 8, kernel_size=(2, 2), stride=2, padding=(0, 1))
-        self.bn1 = BatchNorm2d(8)
-        self.conv2 = Conv2d(8, 16, kernel_size=(4, 4), stride=2, padding=(0, 0))
-        self.bn2 = BatchNorm2d(16)
-        self.conv3 = Conv2d(16, 32, kernel_size=(8, 8), stride=4, padding=(0, 0))
-        self.bn3 = BatchNorm2d(32)
-
-        # last classifying convolutional layer:
-        self.final = Conv2d(32, self.num_actions, (10, 8), stride=1, padding=(0, 0))
+        self.model = Sequential(
+            Conv2d(self.channels, 16, (8, 8), stride=4),
+            ReLU(),
+            Conv2d(16, 32, (4, 4), stride=2),
+            ReLU(),
+            Conv2d(32, 256, (9, 9), stride=1),
+            ReLU(),
+            Conv2d(256, 4, (1, 1), stride=1)
+        )
 
     def forward(self, inp_x):
         """
@@ -82,18 +82,12 @@ class DQN(th.nn.Module):
         :param inp_x: input image of the network [here => (180 x 146) grayscale image]
         :return: preds => predictions for taking an action
         """
-        from torch.nn.functional import relu
 
-        # reassign the tensor name (for simplicity)
-        y = inp_x
-
-        # define the computational pipeline
-        y = relu(self.bn1(self.conv1(y)))
-        y = relu(self.bn2(self.conv2(y)))
-        y = relu(self.bn3(self.conv3(y)))
+        # define the network computations
+        y = self.model(inp_x)
 
         # final classification layer
-        raw_preds = self.final(y).view(-1, self.num_actions)  # squeeze the predictions
+        raw_preds = y.view(-1, self.num_actions)  # squeeze the predictions
 
         # return the predictions
         return raw_preds
@@ -103,8 +97,8 @@ class Agent:
     """ The agent for the RL environment """
 
     def __init__(self, q_net, t_net, memory, batch_size=128, gamma=0.999,
-                 eps_start=0.9, eps_end=0.05, eps_decay=210000, target_update=12,
-                 learning_rate=0.01, clip_value=3):
+                 eps_start=1.0, eps_end=0.1, eps_decay=1000000, target_update=3,
+                 learning_rate=0.01):
         """
         constructor for the class
         """
@@ -120,7 +114,6 @@ class Agent:
         self.eps_decay = eps_decay
         self.target_update = target_update
         self.lr = learning_rate
-        self.clip_value = clip_value
 
         # set a counter for number of steps done
         self.steps_done = 0
@@ -134,8 +127,12 @@ class Agent:
 
     def select_action(self, state):
         sample = random.random()
-        eps_threshold = (self.eps_end + (self.eps_start - self.eps_end) *
-                         np.exp(-1. * self.steps_done / self.eps_decay))
+        if self.steps_done <= self.eps_decay:
+            eps_threshold = (self.eps_start - ((self.eps_start - self.eps_end) *
+                                               (self.steps_done / self.eps_decay)))
+        else:
+            eps_threshold = self.eps_end
+
         self.steps_done += 1
         if sample > eps_threshold:
             with th.no_grad():
@@ -185,22 +182,18 @@ class Agent:
         # Optimize the model
         self.optimizer.zero_grad()
         loss.backward()
-
-        # gradient clipping in the range => [-1, 1]
-        for param in self.q_net.parameters():
-            param.grad.data.clamp_(-self.clip_value, self.clip_value)
         self.optimizer.step()
 
         return loss.item()
 
 
-def subtract_scaled_frames(fr1, fr2, alpha=0.7):
+def subtract_scaled_frames(fr1, fr2, alpha=0.03):
     """
     subtract the second frame from the first one after alpha scaling
     Generally used after preprocessing frames
     :param fr1: previous observation
     :param fr2: current observation
-    :param alpha: scaling constant
+    :param alpha: scaling constant for fr_1
     :return: sub => combined frame
     """
     return fr2 - (alpha * fr1)
@@ -222,19 +215,22 @@ def preprocess_frame(observation):
     :param observation: observation Frame
     :return: nor => Preprocessed frame
     """
-    # crop the observation
-    crop = observation[30:, 7: -7, :]
+    # removing the colour from the observation
+    bnw_ins_obs = observation.mean(axis=-1)
 
-    # make it black and white
-    bnw = crop.mean(axis=-1)
+    # downsample the observation
+    ds_ins_obs = cv2.resize(bnw_ins_obs, (84, 110))
 
-    # normalize the images
-    nor = bnw / 255
+    # cropping the observation
+    cropped_ins_obs = ds_ins_obs[21: -5, :]
+
+    # finally normalize the images:
+    nor = cropped_ins_obs / 255
 
     return nor
 
 
-def play_one_episode(agent, env, render=False, inverse_speed=0.05, save_dir="./Out"):
+def play_one_episode(agent, env, render=False, save_dir="./Out"):
     # apply the monitor if render is false
     if not render:
         work_env = gym.wrappers.Monitor(env, directory=save_dir, resume=True)
@@ -260,7 +256,6 @@ def play_one_episode(agent, env, render=False, inverse_speed=0.05, save_dir="./O
 
         if render:
             work_env.render()
-        time.sleep(inverse_speed)
 
 
 def train_agent(agent, env, num_episodes=100, feed_back_factor=100,
@@ -314,10 +309,10 @@ def train_agent(agent, env, num_episodes=100, feed_back_factor=100,
         # save the model
         if i_episode % save_after == 0 or i_episode == 0:
             print("Saving Model ... ")
-            with open(os.path.join(save_dir, "Checkpoint"), 'w') as chkp:
+            with open(os.path.join(save_dir, "Checkpoint"+str(i_episode + 1)), 'w') as chkp:
                 chkp.write("total_episodes: " + str(i_episode + 1) + "\n")
                 chkp.write("total_steps: " + str(agent.steps_done) + "\n")
-            th.save(agent.q_net, os.path.join(save_dir, "Model"+str(i_episode+1)+".pth"),
+            th.save(agent.q_net, os.path.join(save_dir, "Model" + str(i_episode + 1) + ".pth"),
                     pickle)
 
         # Update the target network
@@ -356,7 +351,7 @@ def main(args):
     target_network = DQN(1, num_actions).to(device)
 
     # create an agent:
-    agent = Agent(q_network, target_network, ReplayMemory(10000), batch_size=256)
+    agent = Agent(q_network, target_network, ReplayMemory(1000000), batch_size=32)
 
     # train the agent
     train_agent(agent, env, num_episodes=21000)
