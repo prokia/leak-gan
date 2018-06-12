@@ -6,6 +6,7 @@
 import argparse
 import os
 import torch as th
+import pickle
 
 from torch.utils.data import Dataset
 
@@ -102,6 +103,342 @@ def setup_data(new_size, batch_size, p_readers):
     return d_loader
 
 
+class Generator(th.nn.Module):
+    """ Generator of the GAN """
+
+    def __init__(self, noise_size=512):
+        """
+        constructor of the class
+        :param noise_size: dimensionality of the input prior Z
+        """
+
+        super(Generator, self).__init__()  # super constructor call
+
+        # define the state of the object
+        self.z_size = noise_size
+
+        # define all the required modules for the generator
+        from torch.nn import ConvTranspose2d, Conv2d, Upsample, LeakyReLU
+        from torch.nn.functional import local_response_norm
+
+        ch = self.z_size
+
+        # Layer 1:
+        self.conv_1_1 = ConvTranspose2d(ch, ch, (4, 4))
+        self.conv_1_2 = Conv2d(ch, ch, (3, 3), padding=1)
+
+        # Layer 2:
+        self.conv_2_1 = Conv2d(ch, ch, (3, 3), padding=1)
+        self.conv_2_2 = Conv2d(ch, ch, (3, 3), padding=1)
+
+        # Layer 3:
+        self.conv_3_1 = Conv2d(ch, ch, (3, 3), padding=1)
+        self.conv_3_2 = Conv2d(ch, ch, (3, 3), padding=1)
+
+        # Layer 4:
+        self.conv_4_1 = Conv2d(ch, ch, (3, 3), padding=1)
+        self.conv_4_2 = Conv2d(ch, ch, (3, 3), padding=1)
+
+        # Layer 5:
+        self.conv_5_1 = Conv2d(ch, ch // 2, (3, 3), padding=1)
+        self.conv_5_2 = Conv2d(ch // 2, ch // 2, (3, 3), padding=1)
+
+        # Layer 6:
+        self.conv_6_1 = Conv2d(ch // 2, ch // 4, (3, 3), padding=1)
+        self.conv_6_2 = Conv2d(ch // 4, ch // 4, (3, 3), padding=1)
+
+        # Upsampler
+        self.upsample = Upsample(scale_factor=2)
+
+        # To RGB converter operation:
+        self.ToRGB = Conv2d(ch // 4, 3, (1, 1), bias=False)
+
+        # Pixelwise feature vector normalization operation
+        self.pixNorm = lambda x: local_response_norm(x, 2*x.shape[1], alpha=2, beta=0.5,
+                                                     k=1e-8)
+
+        # Leaky Relu to be applied as activation
+        self.lrelu = LeakyReLU(negative_slope=0.2)
+
+    def forward(self, x):
+        """
+        forward pass of the Generator
+        :param x:
+        :return: samps => generated Samples
+        """
+        # Define the forward computations
+        from torch.nn.functional import tanh
+
+        y = self.lrelu(self.conv_1_1(x))
+        y = self.lrelu(self.pixNorm(self.conv_1_2(y)))
+
+        y = self.upsample(y)
+        y = self.lrelu(self.pixNorm(self.conv_2_1(y)))
+        y = self.lrelu(self.pixNorm(self.conv_2_2(y)))
+
+        y = self.upsample(y)
+        y = self.lrelu(self.pixNorm(self.conv_3_1(y)))
+        y = self.lrelu(self.pixNorm(self.conv_3_2(y)))
+
+        y = self.upsample(y)
+        y = self.lrelu(self.pixNorm(self.conv_4_1(y)))
+        y = self.lrelu(self.pixNorm(self.conv_4_2(y)))
+
+        y = self.upsample(y)
+        y = self.lrelu(self.pixNorm(self.conv_5_1(y)))
+        y = self.lrelu(self.pixNorm(self.conv_5_2(y)))
+
+        y = self.upsample(y)
+        y = self.lrelu(self.pixNorm(self.conv_6_1(y)))
+        y = self.lrelu(self.pixNorm(self.conv_6_2(y)))
+
+        # convert the output to RGB form:
+        samps = tanh(self.ToRGB(y))
+
+        # return the generated samples:
+        return samps
+
+
+class Discriminator(th.nn.Module):
+    """ Discriminator of the GAN """
+
+    def __init__(self):
+
+        super(Discriminator, self).__init__()  # super constructor call
+
+        # define all the required modules for the generator
+        from torch.nn import Conv2d, LeakyReLU, AvgPool2d
+
+        channels = 3  # for RGB images
+        net_ch = 128
+
+        # Layer 1:
+        self.conv_1_1 = Conv2d(channels, net_ch, (1, 1))
+        self.conv_1_2 = Conv2d(net_ch, net_ch, (3, 3), padding=1)
+        self.conv_1_3 = Conv2d(net_ch, 2 * net_ch, (3, 3), padding=1)
+
+        # Layer 2:
+        self.conv_2_1 = Conv2d(2 * net_ch, 2 * net_ch, (3, 3), padding=1)
+        self.conv_2_2 = Conv2d(2 * net_ch, 4 * net_ch, (3, 3), padding=1)
+
+        # fixing number of channels hereon ...
+        fix_channel = 4 * net_ch
+
+        # Layer 3:
+        self.conv_3_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
+        self.conv_3_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
+
+        # Layer 4:
+        self.conv_4_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
+        self.conv_4_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
+
+        # Layer 5:
+        self.conv_5_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
+        self.conv_5_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
+
+        # Layer 6:
+        self.conv_6_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
+        self.conv_6_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
+        self.conv_6_3 = Conv2d(fix_channel, fix_channel, (4, 4))
+        self.conv_6_4 = Conv2d(fix_channel, 1, (1, 1))
+
+        # Downsampler (Average pooling)
+        self.downsample = AvgPool2d(2)
+
+        # Leaky Relu to be applied as activation
+        self.lrelu = LeakyReLU(negative_slope=0.2)
+
+    def forward(self, x):
+        """
+        forward pass of the Discriminator
+        :param x: input images
+        :return: raw_preds => raw prediction score for WGAN
+        """
+
+        # Define the Forward computations:
+        y = self.lrelu(self.conv_1_1(x))
+        y = self.lrelu(self.conv_1_2(y))
+        y = self.lrelu(self.conv_1_3(y))
+        y = self.downsample(y)
+
+        y = self.lrelu(self.conv_2_1(y))
+        y = self.lrelu(self.conv_2_2(y))
+        y = self.downsample(y)
+
+        y = self.lrelu(self.conv_3_1(y))
+        y = self.lrelu(self.conv_3_2(y))
+        y = self.downsample(y)
+
+        y = self.lrelu(self.conv_4_1(y))
+        y = self.lrelu(self.conv_4_2(y))
+        y = self.downsample(y)
+
+        y = self.lrelu(self.conv_5_1(y))
+        y = self.lrelu(self.conv_5_2(y))
+        y = self.downsample(y)
+
+        y = self.lrelu(self.conv_6_1(y))
+        y = self.lrelu(self.conv_6_2(y))
+        y = self.lrelu(self.conv_6_3(y))
+        y = self.conv_6_4(y)  # last layer has linear activation
+
+        # generate the raw predictions
+        raw_preds = y.view(-1)
+
+        return raw_preds
+
+
+class GAN:
+    """ Wrapper around the Generator and the Discriminator """
+
+    class WeightClipper:
+        """ Simple class for implementing weight clamping """
+        def __init__(self, clamp_value):
+            """ constructor """
+            self.clamp_val = clamp_value
+
+        def __call__(self, module):
+            """ Recursive application of weight clamping """
+            # filter the variables to get the ones you want
+            if hasattr(module, 'weight'):
+                w = module.weight.data
+                th.clamp(w, min=-self.clamp_val, max=self.clamp_val, out=w)
+
+    def __init__(self, generator, discriminator, learning_rate=0.001, beta_1=0,
+                 beta_2=0.99, eps=1e-8, clamp_value=0.01):
+
+        from torch.optim import Adam
+
+        # define the state of the object
+        self.gen = generator
+        self.dis = discriminator
+
+        # define the optimizers for the discriminator and generator
+        self.gen_optim = Adam(self.gen.parameters(), lr=learning_rate,
+                              betas=(beta_1, beta_2), eps=eps)
+
+        self.dis_optim = Adam(self.dis.parameters(), lr=learning_rate,
+                              betas=(beta_1, beta_2), eps=eps)
+
+        self.clamper = self.WeightClipper(clamp_value=clamp_value)
+
+    def generate_samples(self, num):
+        """
+        generate samples using the generator
+        :param num: number of samples required
+        :return: samps => generated samples
+        """
+
+        # generate the required random noise:
+        noise = th.randn(num, self.gen.z_size, 1, 1).to(device)
+
+        # generate the samples by performing the forward pass on generator
+        samps = self.gen(noise)
+
+        return samps
+
+    def optimize_discriminator(self, batch, n_critic=5):
+        """
+        performs one step of weight update on discriminator using the batch of data
+        :param batch: real samples batch
+        :param n_critic: number of times to update discriminator
+        :return: current loss (Wasserstein loss)
+        """
+        # rename the input for simplicity
+        real_samples = batch
+
+        loss_val = 0
+        for _ in range(n_critic):
+            # generate a batch of samples
+            fake_samples = self.generate_samples(batch.shape[0])
+
+            # define the (Wasserstein) loss
+            loss = th.mean(self.dis(real_samples)) - th.mean(self.dis(fake_samples))
+
+            # optimize discriminator
+            self.dis_optim.zero_grad()
+            loss.backward()
+            self.dis_optim.step()
+
+            # clamp the updated weight values
+            self.dis.apply(self.clamper)
+
+            loss_val += loss.item()
+
+        return loss_val / n_critic
+
+    def optimize_generator(self, batch_size):
+        """
+        performs one step of weight update on generator for the given batch_size
+        :param batch_size: batch_size
+        :return: current loss (Wasserstein estimate)
+        """
+
+        # generate fake samples:
+        fake_samples = self.generate_samples(batch_size)
+
+        loss = -th.mean(self.dis(fake_samples))
+
+        # optimize the generator
+        self.gen_optim.zero_grad()
+        loss.backward()
+        self.gen_optim.step()
+
+
+def create_grid(gan, img_file, width=2):
+
+    from torchvision.utils import save_image
+
+    # generate width^2 samples
+    samples = gan.generate_samples(width * width)
+
+    # save the images:
+    save_image(samples, img_file, nrow=width)
+
+
+def train_GAN(gan, data, num_epochs=21, feedback_factor=10,
+              save_dir="./GAN_Models/", sample_dir="GAN_Out/",
+              log_file="./GAN_Models/loss.log", checkpoint_factor=3):
+    """
+    train the GAN (network) using the given data
+    :param gan: GAN object
+    :param data: data_loader stream for training
+    :return: None
+    """
+    total_batches = len(iter(data))
+
+    print("Starting the GAN training ... ")
+    for epoch in range(num_epochs):
+        print("Epoch: %d" % (epoch + 1))
+
+        for (i, batch) in enumerate(data, 1):
+            # optimize the discriminator using the data batch:
+            dis_loss = gan.optimize_discriminator(batch.to(device))
+
+            # optimize the generator using the data batch:
+            gen_loss = gan.optimize_generator(batch.shape[0])
+
+            # provide a loss feedback
+            if i % int(total_batches / feedback_factor) == 0 or i == 1:
+                print("discriminator_loss: ", dis_loss)
+                print("generator_loss: ", gen_loss)
+
+                # also write the losses to the log file:
+                with open(log_file, "a") as log:
+                    log.write(str(dis_loss)+"\t"+str(gen_loss)+"\n")
+
+        if (epoch + 1) % checkpoint_factor == 0 or epoch == 0:
+            # save the GAN
+            gen_save_file = os.path.join(save_dir, "GAN_GEN"+str(epoch+1)+".pth")
+            dis_save_file = os.path.join(save_dir, "GAN_DIS" + str(epoch + 1) + ".pth")
+            th.save(gan.gen.state_dict(), gen_save_file, pickle)
+            th.save(gan.dis.state_dict(), dis_save_file, pickle)
+
+            # create a grid of samples and save it
+            img_file = os.path.join(sample_dir, str(epoch+1)+".png")
+            create_grid(gan, img_file, 4)
+
+
 def parse_arguments():
     """
     Command line argument parser
@@ -139,6 +476,11 @@ def main(args):
         batch_size=args.batch_size,
         p_readers=args.parallel_readers
     )
+
+    gan = GAN(Generator(512), Discriminator())
+
+    # train the gan:
+    train_GAN(gan, data, )
 
 
 if __name__ == '__main__':
