@@ -166,9 +166,9 @@ class Generator(th.nn.Module):
         :param x:
         :return: samps => generated Samples
         """
-        # Define the forward computations
         from torch.nn.functional import tanh
 
+        # Define the forward computations
         y = self.lrelu(self.conv_1_1(x))
         y = self.lrelu(self.pixNorm(self.conv_1_2(y)))
 
@@ -203,7 +203,9 @@ class Discriminator(th.nn.Module):
     """ Discriminator of the GAN """
 
     def __init__(self):
-
+        """
+        constructor for the class
+        """
         super(Discriminator, self).__init__()  # super constructor call
 
         # define all the required modules for the generator
@@ -240,7 +242,7 @@ class Discriminator(th.nn.Module):
         self.conv_6_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
         self.conv_6_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
         self.conv_6_3 = Conv2d(fix_channel, fix_channel, (4, 4))
-        self.conv_6_4 = Conv2d(fix_channel, 1, (1, 1))
+        self.conv_6_4 = Conv2d(fix_channel, 1, (1, 1), bias=False)
 
         # Downsampler (Average pooling)
         self.downsample = AvgPool2d(2)
@@ -305,13 +307,25 @@ class GAN:
                 th.clamp(w, min=-self.clamp_val, max=self.clamp_val, out=w)
 
     def __init__(self, generator, discriminator, learning_rate=0.001, beta_1=0,
-                 beta_2=0.99, eps=1e-8, clamp_value=0.01):
+                 beta_2=0.99, eps=1e-8, clamp_value=0.01, n_critic=5):
+        """
+        constructor for the class
+        :param generator: Generator object
+        :param discriminator: Discriminator object
+        :param learning_rate: learning rate for Adam
+        :param beta_1: beta_1 for Adam
+        :param beta_2: beta_2 for Adam
+        :param eps: epsilon for Adam
+        :param n_critic: number of times to update discriminator
+        :param clamp_value: Clamp value for Wasserstein update
+        """
 
         from torch.optim import Adam
 
         # define the state of the object
         self.gen = generator
         self.dis = discriminator
+        self.n_critic = n_critic
 
         # define the optimizers for the discriminator and generator
         self.gen_optim = Adam(self.gen.parameters(), lr=learning_rate,
@@ -337,18 +351,17 @@ class GAN:
 
         return samps
 
-    def optimize_discriminator(self, batch, n_critic=5):
+    def optimize_discriminator(self, batch):
         """
         performs one step of weight update on discriminator using the batch of data
         :param batch: real samples batch
-        :param n_critic: number of times to update discriminator
         :return: current loss (Wasserstein loss)
         """
         # rename the input for simplicity
         real_samples = batch
 
         loss_val = 0
-        for _ in range(n_critic):
+        for _ in range(self.n_critic):
             # generate a batch of samples
             fake_samples = self.generate_samples(batch.shape[0])
 
@@ -365,7 +378,7 @@ class GAN:
 
             loss_val += loss.item()
 
-        return loss_val / n_critic
+        return loss_val / self.n_critic
 
     def optimize_generator(self, batch_size):
         """
@@ -384,9 +397,18 @@ class GAN:
         loss.backward()
         self.gen_optim.step()
 
+        # return the loss value
+        return loss.item()
+
 
 def create_grid(gan, img_file, width=2):
-
+    """
+    utility funtion to create a grid of GAN samples
+    :param gan: GAN object
+    :param img_file: name of file to write
+    :param width: width for the grid
+    :return: None (saves a file)
+    """
     from torchvision.utils import save_image
 
     # generate width^2 samples
@@ -403,6 +425,12 @@ def train_GAN(gan, data, num_epochs=21, feedback_factor=10,
     train the GAN (network) using the given data
     :param gan: GAN object
     :param data: data_loader stream for training
+    :param num_epochs: Number of epochs to train for
+    :param feedback_factor: number of prints per epoch
+    :param save_dir: directory for saving the GAN models
+    :param sample_dir: directory for storing the generated samples
+    :param log_file: log file for loss collection
+    :param checkpoint_factor: save after every n epochs
     :return: None
     """
     total_batches = len(iter(data))
@@ -420,12 +448,16 @@ def train_GAN(gan, data, num_epochs=21, feedback_factor=10,
 
             # provide a loss feedback
             if i % int(total_batches / feedback_factor) == 0 or i == 1:
-                print("discriminator_loss: ", dis_loss)
-                print("generator_loss: ", gen_loss)
+                print("batch: %d  d_loss: %f  g_loss: %f" % (i, dis_loss, gen_loss))
 
                 # also write the losses to the log file:
                 with open(log_file, "a") as log:
                     log.write(str(dis_loss)+"\t"+str(gen_loss)+"\n")
+
+                # create a grid of samples and save it
+                img_file = os.path.join(sample_dir, str(epoch + 1) + "_" +
+                                        str(i) + ".png")
+                create_grid(gan, img_file, 4)
 
         if (epoch + 1) % checkpoint_factor == 0 or epoch == 0:
             # save the GAN
@@ -434,9 +466,7 @@ def train_GAN(gan, data, num_epochs=21, feedback_factor=10,
             th.save(gan.gen.state_dict(), gen_save_file, pickle)
             th.save(gan.dis.state_dict(), dis_save_file, pickle)
 
-            # create a grid of samples and save it
-            img_file = os.path.join(sample_dir, str(epoch+1)+".png")
-            create_grid(gan, img_file, 4)
+    print("Training completed ...")
 
 
 def parse_arguments():
@@ -452,10 +482,34 @@ def parse_arguments():
                         help="height of the image samples generated. default = 128")
     parser.add_argument("--img_width", action="store", type=int, default=128,
                         help="width of the image samples generated. default = 128")
-    parser.add_argument("--batch_size", action="store", type=int, default=32,
+    parser.add_argument("--batch_size", action="store", type=int, default=8,
                         help="batch size for SGD. default = 32")
     parser.add_argument("--parallel_readers", action="store", type=int, default=3,
                         help="number of parallel processes to read data. default = 3")
+    parser.add_argument("--learning_rate", action="store", type=float, default=0.00005,
+                        help="learning rate for Adam optimization")
+    parser.add_argument("--beta_1", action="store", type=float, default=0,
+                        help="beta_1 for Adam optimization")
+    parser.add_argument("--beta_2", action="store", type=float, default=0.99,
+                        help="beta_2 for Adam optimization")
+    parser.add_argument("--epsilon", action="store", type=float, default=1e-8,
+                        help="epsilon for Adam optimization")
+    parser.add_argument("--clamp_value", action="store", type=float, default=0.01,
+                        help="clamp value for Wasserstein critic")
+    parser.add_argument("--n_critic", action="store", type=int, default=5,
+                        help="number of times to train for Wasserstein critic per step")
+    parser.add_argument("--num_epochs", action="store", type=int, default=21,
+                        help="number of epochs to train the gan for")
+    parser.add_argument("--feedback_factor", action="store", type=int, default=1200,
+                        help="number of times to log loss and generate samples per epoch")
+    parser.add_argument("--save_dir", action="store", type=str, default="./GAN_Models/",
+                        help="directory to save the models")
+    parser.add_argument("--sample_dir", action="store", type=str, default="GAN_Out/",
+                        help="directory to save the generated samples")
+    parser.add_argument("--log_file", action="store", type=str, default="./GAN_Models/loss.log",
+                        help="log file for saving losses")
+    parser.add_argument("--checkpoint_factor", action="store", type=int, default=1,
+                        help="Save after every n epochs")
 
     # parse the detected arguments
     args = parser.parse_args()
@@ -477,10 +531,29 @@ def main(args):
         p_readers=args.parallel_readers
     )
 
-    gan = GAN(Generator(512), Discriminator())
+    # create a GAN
+    gan = GAN(
+        generator=Generator(512).to(device),
+        discriminator=Discriminator().to(device),
+        learning_rate=args.learning_rate,
+        beta_1=args.beta_1,
+        beta_2=args.beta_2,
+        eps=args.epsilon,
+        clamp_value=args.clamp_value,
+        n_critic=args.n_critic
+    )
 
     # train the gan:
-    train_GAN(gan, data, )
+    train_GAN(
+        gan=gan,
+        data=data,
+        num_epochs=args.num_epochs,
+        feedback_factor=args.feedback_factor,
+        save_dir=args.save_dir,
+        sample_dir=args.sample_dir,
+        log_file=args.log_file,
+        checkpoint_factor=args.checkpoint_factor,
+    )
 
 
 if __name__ == '__main__':
