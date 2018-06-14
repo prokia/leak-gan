@@ -332,7 +332,7 @@ class GAN:
         batch_size = real_samps.shape[0]
 
         # generate random epsilon
-        epsilon = th.rand((batch_size, 1, 1, 1))
+        epsilon = th.rand((batch_size, 1, 1, 1)).to(device)
 
         # create the merge of both real and fake samples
         merged = (epsilon * real_samps) + ((1 - epsilon) * fake_samps)
@@ -517,8 +517,6 @@ def parse_arguments():
                         help="beta_2 for Adam optimization")
     parser.add_argument("--epsilon", action="store", type=float, default=1e-8,
                         help="epsilon for Adam optimization")
-    parser.add_argument("--clamp_value", action="store", type=float, default=0.01,
-                        help="clamp value for Wasserstein critic")
     parser.add_argument("--n_critic", action="store", type=int, default=5,
                         help="number of times to train for Wasserstein critic per step")
     parser.add_argument("--num_epochs", action="store", type=int, default=21,
@@ -562,7 +560,6 @@ def main(args):
         beta_1=args.beta_1,
         beta_2=args.beta_2,
         eps=args.epsilon,
-        clamp_value=args.clamp_value,
         n_critic=args.n_critic
     )
 
