@@ -143,15 +143,11 @@ class Generator(th.nn.Module):
         self.conv_5_1 = Conv2d(ch, ch // 2, (3, 3), padding=1)
         self.conv_5_2 = Conv2d(ch // 2, ch // 2, (3, 3), padding=1)
 
-        # Layer 6:
-        self.conv_6_1 = Conv2d(ch // 2, ch // 4, (3, 3), padding=1)
-        self.conv_6_2 = Conv2d(ch // 4, ch // 4, (3, 3), padding=1)
-
         # Upsampler
         self.upsample = Upsample(scale_factor=2)
 
         # To RGB converter operation:
-        self.ToRGB = Conv2d(ch // 4, 3, (1, 1), bias=False)
+        self.ToRGB = Conv2d(ch // 2, 3, (1, 1), bias=False)
 
         # Pixelwise feature vector normalization operation
         self.pixNorm = lambda x: local_response_norm(x, 2*x.shape[1], alpha=2, beta=0.5,
@@ -188,10 +184,6 @@ class Generator(th.nn.Module):
         y = self.lrelu(self.pixNorm(self.conv_5_1(y)))
         y = self.lrelu(self.pixNorm(self.conv_5_2(y)))
 
-        y = self.upsample(y)
-        y = self.lrelu(self.pixNorm(self.conv_6_1(y)))
-        y = self.lrelu(self.pixNorm(self.conv_6_2(y)))
-
         # convert the output to RGB form:
         samps = tanh(self.ToRGB(y))
 
@@ -209,53 +201,35 @@ class Discriminator(th.nn.Module):
         super(Discriminator, self).__init__()  # super constructor call
 
         # define all the required modules for the generator
-        from torch.nn import Conv2d, LeakyReLU, AvgPool2d, BatchNorm2d
+        from torch.nn import Conv2d, LeakyReLU, AvgPool2d
 
         channels = 3  # for RGB images
         net_ch = 128
 
         # Layer 1:
         self.conv_1_1 = Conv2d(channels, net_ch, (1, 1))
-        self.bn_1_1 = BatchNorm2d(net_ch)
         self.conv_1_2 = Conv2d(net_ch, net_ch, (3, 3), padding=1)
-        self.bn_1_2 = BatchNorm2d(net_ch)
         self.conv_1_3 = Conv2d(net_ch, 2 * net_ch, (3, 3), padding=1)
-        self.bn_1_3 = BatchNorm2d(2 * net_ch)
 
         # Layer 2:
         self.conv_2_1 = Conv2d(2 * net_ch, 2 * net_ch, (3, 3), padding=1)
-        self.bn_2_1 = BatchNorm2d(2 * net_ch)
         self.conv_2_2 = Conv2d(2 * net_ch, 4 * net_ch, (3, 3), padding=1)
-        self.bn_2_2 = BatchNorm2d(4 * net_ch)
 
         # fixing number of channels hereon ...
         fix_channel = 4 * net_ch
 
         # Layer 3:
         self.conv_3_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
-        self.bn_3_1 = BatchNorm2d(fix_channel)
         self.conv_3_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
-        self.bn_3_2 = BatchNorm2d(fix_channel)
 
         # Layer 4:
         self.conv_4_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
-        self.bn_4_1 = BatchNorm2d(fix_channel)
         self.conv_4_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
-        self.bn_4_2 = BatchNorm2d(fix_channel)
-
-        # Layer 5:
-        self.conv_5_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
-        self.bn_5_1 = BatchNorm2d(fix_channel)
-        self.conv_5_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
-        self.bn_5_2 = BatchNorm2d(fix_channel)
 
         # Layer 6:
         self.conv_6_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
-        self.bn_6_1 = BatchNorm2d(fix_channel)
         self.conv_6_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
-        self.bn_6_2 = BatchNorm2d(fix_channel)
         self.conv_6_3 = Conv2d(fix_channel, fix_channel, (4, 4))
-        self.bn_6_3 = BatchNorm2d(fix_channel)
         self.conv_6_4 = Conv2d(fix_channel, 1, (1, 1), bias=False)
 
         # Downsampler (Average pooling)
@@ -272,30 +246,26 @@ class Discriminator(th.nn.Module):
         """
 
         # Define the Forward computations:
-        y = self.lrelu(self.bn_1_1(self.conv_1_1(x)))
-        y = self.lrelu(self.bn_1_2(self.conv_1_2(y)))
-        y = self.lrelu(self.bn_1_3(self.conv_1_3(y)))
+        y = self.lrelu(self.conv_1_1(x))
+        y = self.lrelu(self.conv_1_2(y))
+        y = self.lrelu(self.conv_1_3(y))
         y = self.downsample(y)
 
-        y = self.lrelu(self.bn_2_1(self.conv_2_1(y)))
-        y = self.lrelu(self.bn_2_2(self.conv_2_2(y)))
+        y = self.lrelu(self.conv_2_1(y))
+        y = self.lrelu(self.conv_2_2(y))
         y = self.downsample(y)
 
-        y = self.lrelu(self.bn_3_1(self.conv_3_1(y)))
-        y = self.lrelu(self.bn_3_2(self.conv_3_2(y)))
+        y = self.lrelu(self.conv_3_1(y))
+        y = self.lrelu(self.conv_3_2(y))
         y = self.downsample(y)
 
-        y = self.lrelu(self.bn_4_1(self.conv_4_1(y)))
-        y = self.lrelu(self.bn_4_2(self.conv_4_2(y)))
+        y = self.lrelu(self.conv_4_1(y))
+        y = self.lrelu(self.conv_4_2(y))
         y = self.downsample(y)
 
-        y = self.lrelu(self.bn_5_1(self.conv_5_1(y)))
-        y = self.lrelu(self.bn_5_2(self.conv_5_2(y)))
-        y = self.downsample(y)
-
-        y = self.lrelu(self.bn_6_1(self.conv_6_1(y)))
-        y = self.lrelu(self.bn_6_2(self.conv_6_2(y)))
-        y = self.lrelu(self.bn_6_3(self.conv_6_3(y)))
+        y = self.lrelu(self.conv_6_1(y))
+        y = self.lrelu(self.conv_6_2(y))
+        y = self.lrelu(self.conv_6_3(y))
         y = self.conv_6_4(y)  # last layer has linear activation
 
         # generate the raw predictions
@@ -307,25 +277,8 @@ class Discriminator(th.nn.Module):
 class GAN:
     """ Wrapper around the Generator and the Discriminator """
 
-    class WeightClipper:
-        """ Simple class for implementing weight clamping """
-        def __init__(self, clamp_value):
-            """ constructor """
-            self.clamp_val = clamp_value
-
-        def __call__(self, module):
-            """ Recursive application of weight clamping """
-            # filter the variables to get the ones you want
-            if hasattr(module, 'weight'):
-                w = module.weight.data
-                th.clamp(w, min=-self.clamp_val, max=self.clamp_val, out=w)
-
-            if hasattr(module, 'bias') and hasattr(module.bias, 'data'):
-                b = module.bias.data
-                th.clamp(b, min=-self.clamp_val, max=self.clamp_val, out=b)
-
     def __init__(self, generator, discriminator, learning_rate=0.001, beta_1=0,
-                 beta_2=0.99, eps=1e-8, clamp_value=0.01, n_critic=5):
+                 beta_2=0.99, eps=1e-8, n_critic=5):
         """
         constructor for the class
         :param generator: Generator object
@@ -335,7 +288,6 @@ class GAN:
         :param beta_2: beta_2 for Adam
         :param eps: epsilon for Adam
         :param n_critic: number of times to update discriminator
-        :param clamp_value: Clamp value for Wasserstein update
         """
 
         from torch.optim import Adam
@@ -352,8 +304,6 @@ class GAN:
         self.dis_optim = Adam(self.dis.parameters(), lr=learning_rate,
                               betas=(beta_1, beta_2), eps=eps)
 
-        self.clamper = self.WeightClipper(clamp_value=clamp_value)
-
     def generate_samples(self, num):
         """
         generate samples using the generator
@@ -369,12 +319,63 @@ class GAN:
 
         return samps
 
+    def __gradient_penalty(self, real_samps, fake_samps, reg_lambda=10):
+        """
+        private helper for calculating the gradient penalty
+        :param real_samps: real samples
+        :param fake_samps: fake samples
+        :param reg_lambda: regularisation lambda
+        :return: tensor (gradient penalty)
+        """
+        from torch.autograd import grad
+
+        batch_size = real_samps.shape[0]
+
+        # generate random epsilon
+        epsilon = th.rand((batch_size, 1, 1, 1))
+
+        # create the merge of both real and fake samples
+        merged = (epsilon * real_samps) + ((1 - epsilon) * fake_samps)
+
+        # forward pass
+        op = self.dis(merged)
+
+        # obtain gradient of op wrt. merged
+        gradient = grad(outputs=op, inputs=merged, create_graph=True,
+                        grad_outputs=th.ones_like(op),
+                        retain_graph=True, only_inputs=True)[0]
+
+        # calculate the penalty using these gradients
+        penalty = reg_lambda * ((gradient.norm(p=2, dim=1) - 1) ** 2).mean()
+
+        # return the calculated penalty:
+        return penalty
+
+    def __turn_off_dis_grads(self):
+        """
+        turn off discriminator gradients (to save computational power)
+        :return: None
+        """
+        for p in self.dis.parameters():
+            p.requires_grad = False
+
+    def __turn_on_dis_grads(self):
+        """
+        turn on discriminator gradients (for weight updates)
+        :return: None
+        """
+        for p in self.dis.parameters():
+            p.requires_grad = True
+
     def optimize_discriminator(self, batch):
         """
         performs one step of weight update on discriminator using the batch of data
         :param batch: real samples batch
         :return: current loss (Wasserstein loss)
         """
+        # turn on gradients for discriminator
+        self.__turn_on_dis_grads()
+
         # rename the input for simplicity
         real_samples = batch
 
@@ -383,16 +384,16 @@ class GAN:
             # generate a batch of samples
             fake_samples = self.generate_samples(batch.shape[0])
 
+            # calculate the WGAN-GP (gradient penalty)
+            gp = self.__gradient_penalty(real_samples, fake_samples)
+
             # define the (Wasserstein) loss
-            loss = th.mean(self.dis(real_samples)) - th.mean(self.dis(fake_samples))
+            loss = th.mean(self.dis(fake_samples)) - th.mean(self.dis(real_samples)) + gp
 
             # optimize discriminator
             self.dis_optim.zero_grad()
             loss.backward()
             self.dis_optim.step()
-
-            # clamp the updated weight values
-            self.dis.apply(self.clamper)
 
             loss_val += loss.item()
 
@@ -404,6 +405,8 @@ class GAN:
         :param batch_size: batch_size
         :return: current loss (Wasserstein estimate)
         """
+        # turn off discriminator gradient computations
+        self.__turn_off_dis_grads()
 
         # generate fake samples:
         fake_samples = self.generate_samples(batch_size)
@@ -421,7 +424,7 @@ class GAN:
 
 def create_grid(gan, img_file, width=2):
     """
-    utility funtion to create a grid of GAN samples
+    utility function to create a grid of GAN samples
     :param gan: GAN object
     :param img_file: name of file to write
     :param width: width for the grid
@@ -498,11 +501,11 @@ def parse_arguments():
     parser = argparse.ArgumentParser()
 
     # define the arguments to parse
-    parser.add_argument("--img_height", action="store", type=int, default=128,
-                        help="height of the image samples generated. default = 128")
-    parser.add_argument("--img_width", action="store", type=int, default=128,
-                        help="width of the image samples generated. default = 128")
-    parser.add_argument("--batch_size", action="store", type=int, default=8,
+    parser.add_argument("--img_height", action="store", type=int, default=64,
+                        help="height of the image samples generated. default = 64")
+    parser.add_argument("--img_width", action="store", type=int, default=64,
+                        help="width of the image samples generated. default = 64")
+    parser.add_argument("--batch_size", action="store", type=int, default=2,
                         help="batch size for SGD. default = 8")
     parser.add_argument("--parallel_readers", action="store", type=int, default=3,
                         help="number of parallel processes to read data. default = 3")
