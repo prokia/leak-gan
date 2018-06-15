@@ -124,24 +124,24 @@ class Generator(th.nn.Module):
         ch = self.z_size
 
         # Layer 1:
-        self.conv_1_1 = ConvTranspose2d(ch, ch, (4, 4))
-        self.conv_1_2 = Conv2d(ch, ch, (3, 3), padding=1)
+        self.conv_1_1 = ConvTranspose2d(ch, ch, (4, 4), bias=False)
+        self.conv_1_2 = Conv2d(ch, ch, (3, 3), padding=1, bias=False)
 
         # Layer 2:
-        self.conv_2_1 = Conv2d(ch, ch, (3, 3), padding=1)
-        self.conv_2_2 = Conv2d(ch, ch, (3, 3), padding=1)
+        self.conv_2_1 = Conv2d(ch, ch, (3, 3), padding=1, bias=False)
+        self.conv_2_2 = Conv2d(ch, ch, (3, 3), padding=1, bias=False)
 
         # Layer 3:
-        self.conv_3_1 = Conv2d(ch, ch, (3, 3), padding=1)
-        self.conv_3_2 = Conv2d(ch, ch, (3, 3), padding=1)
+        self.conv_3_1 = Conv2d(ch, ch, (3, 3), padding=1, bias=False)
+        self.conv_3_2 = Conv2d(ch, ch, (3, 3), padding=1, bias=False)
 
         # Layer 4:
-        self.conv_4_1 = Conv2d(ch, ch, (3, 3), padding=1)
-        self.conv_4_2 = Conv2d(ch, ch, (3, 3), padding=1)
+        self.conv_4_1 = Conv2d(ch, ch, (3, 3), padding=1, bias=False)
+        self.conv_4_2 = Conv2d(ch, ch, (3, 3), padding=1, bias=False)
 
         # Layer 5:
-        self.conv_5_1 = Conv2d(ch, ch // 2, (3, 3), padding=1)
-        self.conv_5_2 = Conv2d(ch // 2, ch // 2, (3, 3), padding=1)
+        self.conv_5_1 = Conv2d(ch, ch // 2, (3, 3), padding=1, bias=False)
+        self.conv_5_2 = Conv2d(ch // 2, ch // 2, (3, 3), padding=1, bias=False)
 
         # Upsampler
         self.upsample = Upsample(scale_factor=2)
@@ -194,6 +194,36 @@ class Generator(th.nn.Module):
 class Discriminator(th.nn.Module):
     """ Discriminator of the GAN """
 
+    class MinibatchStdDev(th.nn.Module):
+        """ module implementing the minibatch_Stddev from the Pro-GAN paper. """
+
+        def __init__(self):
+            """ constructor for the class """
+            super().__init__()
+            # this layer doesn't have parameters
+
+        def forward(self, x):
+            """
+            forward pass of the module
+            :param x: input Tensor (B x C x H x W)
+            :return: fwd => output Tensor (B x (C + 1) x H x W)
+            """
+
+            # calculate the std of x over the batch dimension
+            std_x = x.std(dim=0)
+
+            # average the std over all
+            m_value = std_x.mean()
+
+            # replicate the value over all spatial locations for
+            # all examples
+            b_size, _, h, w = x.shape
+            constant_concat = m_value.expand(b_size, 1, h, w)
+            fwd = th.cat((x, constant_concat), dim=1)
+
+            # return the output tensor
+            return fwd
+
     def __init__(self):
         """
         constructor for the class
@@ -202,38 +232,46 @@ class Discriminator(th.nn.Module):
 
         # define all the required modules for the generator
         from torch.nn import Conv2d, LeakyReLU, AvgPool2d
+        from torch.nn.functional import local_response_norm
 
         channels = 3  # for RGB images
         net_ch = 128
 
         # Layer 1:
-        self.conv_1_1 = Conv2d(channels, net_ch, (1, 1))
-        self.conv_1_2 = Conv2d(net_ch, net_ch, (3, 3), padding=1)
-        self.conv_1_3 = Conv2d(net_ch, 2 * net_ch, (3, 3), padding=1)
+        self.conv_1_1 = Conv2d(channels, net_ch, (1, 1), bias=False)
+        self.conv_1_2 = Conv2d(net_ch, net_ch, (3, 3), padding=1, bias=False)
+        self.conv_1_3 = Conv2d(net_ch, 2 * net_ch, (3, 3), padding=1, bias=False)
 
         # Layer 2:
-        self.conv_2_1 = Conv2d(2 * net_ch, 2 * net_ch, (3, 3), padding=1)
-        self.conv_2_2 = Conv2d(2 * net_ch, 4 * net_ch, (3, 3), padding=1)
+        self.conv_2_1 = Conv2d(2 * net_ch, 2 * net_ch, (3, 3), padding=1, bias=False)
+        self.conv_2_2 = Conv2d(2 * net_ch, 4 * net_ch, (3, 3), padding=1, bias=False)
 
         # fixing number of channels hereon ...
         fix_channel = 4 * net_ch
 
         # Layer 3:
-        self.conv_3_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
-        self.conv_3_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
+        self.conv_3_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1, bias=False)
+        self.conv_3_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1, bias=False)
 
         # Layer 4:
-        self.conv_4_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
-        self.conv_4_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
+        self.conv_4_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1, bias=False)
+        self.conv_4_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1, bias=False)
 
-        # Layer 6:
-        self.conv_6_1 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
-        self.conv_6_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1)
-        self.conv_6_3 = Conv2d(fix_channel, fix_channel, (4, 4))
+        # Layer 6: (conv_6_1 has +1 due to min_std layer)
+        self.conv_6_1 = Conv2d(fix_channel + 1, fix_channel, (3, 3), padding=1, bias=False)
+        self.conv_6_2 = Conv2d(fix_channel, fix_channel, (3, 3), padding=1, bias=False)
+        self.conv_6_3 = Conv2d(fix_channel, fix_channel, (4, 4), bias=False)
         self.conv_6_4 = Conv2d(fix_channel, 1, (1, 1), bias=False)
 
         # Downsampler (Average pooling)
         self.downsample = AvgPool2d(2)
+
+        # create the miniBatch stddev layer:
+        self.min_std = self.MinibatchStdDev()
+
+        # Pixelwise feature vector normalization operation
+        self.pixNorm = lambda x: local_response_norm(x, 2 * x.shape[1], alpha=2, beta=0.5,
+                                                     k=1e-8)
 
         # Leaky Relu to be applied as activation
         self.lrelu = LeakyReLU(negative_slope=0.2)
@@ -247,25 +285,26 @@ class Discriminator(th.nn.Module):
 
         # Define the Forward computations:
         y = self.lrelu(self.conv_1_1(x))
-        y = self.lrelu(self.conv_1_2(y))
-        y = self.lrelu(self.conv_1_3(y))
+        y = self.lrelu(self.pixNorm(self.conv_1_2(y)))
+        y = self.lrelu(self.pixNorm(self.conv_1_3(y)))
         y = self.downsample(y)
 
-        y = self.lrelu(self.conv_2_1(y))
-        y = self.lrelu(self.conv_2_2(y))
+        y = self.lrelu(self.pixNorm(self.conv_2_1(y)))
+        y = self.lrelu(self.pixNorm(self.conv_2_2(y)))
         y = self.downsample(y)
 
-        y = self.lrelu(self.conv_3_1(y))
-        y = self.lrelu(self.conv_3_2(y))
+        y = self.lrelu(self.pixNorm(self.conv_3_1(y)))
+        y = self.lrelu(self.pixNorm(self.conv_3_2(y)))
         y = self.downsample(y)
 
-        y = self.lrelu(self.conv_4_1(y))
-        y = self.lrelu(self.conv_4_2(y))
+        y = self.lrelu(self.pixNorm(self.conv_4_1(y)))
+        y = self.lrelu(self.pixNorm(self.conv_4_2(y)))
         y = self.downsample(y)
 
-        y = self.lrelu(self.conv_6_1(y))
-        y = self.lrelu(self.conv_6_2(y))
-        y = self.lrelu(self.conv_6_3(y))
+        y = self.min_std(y)
+        y = self.lrelu(self.pixNorm(self.conv_6_1(y)))
+        y = self.lrelu(self.pixNorm(self.conv_6_2(y)))
+        y = self.lrelu(self.pixNorm(self.conv_6_3(y)))
         y = self.conv_6_4(y)  # last layer has linear activation
 
         # generate the raw predictions
@@ -397,7 +436,7 @@ class GAN:
 
             loss_val += loss.item()
 
-        return loss_val / self.n_critic
+        return -(loss_val / self.n_critic)
 
     def optimize_generator(self, batch_size):
         """
@@ -419,7 +458,7 @@ class GAN:
         self.gen_optim.step()
 
         # return the loss value
-        return loss.item()
+        return -loss.item()
 
 
 def create_grid(gan, img_file, width=2):
@@ -505,31 +544,31 @@ def parse_arguments():
                         help="height of the image samples generated. default = 64")
     parser.add_argument("--img_width", action="store", type=int, default=64,
                         help="width of the image samples generated. default = 64")
-    parser.add_argument("--batch_size", action="store", type=int, default=2,
+    parser.add_argument("--batch_size", action="store", type=int, default=8,
                         help="batch size for SGD. default = 8")
     parser.add_argument("--parallel_readers", action="store", type=int, default=3,
                         help="number of parallel processes to read data. default = 3")
-    parser.add_argument("--learning_rate", action="store", type=float, default=0.00005,
+    parser.add_argument("--learning_rate", action="store", type=float, default=0.0001,
                         help="learning rate for Adam optimization")
     parser.add_argument("--beta_1", action="store", type=float, default=0,
                         help="beta_1 for Adam optimization")
-    parser.add_argument("--beta_2", action="store", type=float, default=0.99,
+    parser.add_argument("--beta_2", action="store", type=float, default=0.9,
                         help="beta_2 for Adam optimization")
-    parser.add_argument("--epsilon", action="store", type=float, default=1e-8,
+    parser.add_argument("--epsilon", action="store", type=float, default=1e-12,
                         help="epsilon for Adam optimization")
     parser.add_argument("--n_critic", action="store", type=int, default=5,
                         help="number of times to train for Wasserstein critic per step")
-    parser.add_argument("--num_epochs", action="store", type=int, default=21,
+    parser.add_argument("--num_epochs", action="store", type=int, default=3,
                         help="number of epochs to train the gan for")
-    parser.add_argument("--feedback_factor", action="store", type=int, default=20,
+    parser.add_argument("--feedback_factor", action="store", type=int, default=1277,
                         help="number of times to log loss and generate samples per epoch")
-    parser.add_argument("--save_dir", action="store", type=str, default="./GAN_Models/",
+    parser.add_argument("--save_dir", action="store", type=str, default="./GAN_Models_5/",
                         help="directory to save the models")
-    parser.add_argument("--sample_dir", action="store", type=str, default="GAN_Out/",
+    parser.add_argument("--sample_dir", action="store", type=str, default="GAN_Out_5/",
                         help="directory to save the generated samples")
-    parser.add_argument("--log_file", action="store", type=str, default="./GAN_Models/loss.log",
+    parser.add_argument("--log_file", action="store", type=str, default="./GAN_Models_5/loss.log",
                         help="log file for saving losses")
-    parser.add_argument("--checkpoint_factor", action="store", type=int, default=2,
+    parser.add_argument("--checkpoint_factor", action="store", type=int, default=1,
                         help="Save after every n epochs")
 
     # parse the detected arguments

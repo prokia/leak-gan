@@ -1,5 +1,5 @@
 # ignore the saved_models and the generated videos
 Out/
 Saved_Models/
-GAN_Models/
-GAN_Out/
+GAN_Models*/
+GAN_Out*/
