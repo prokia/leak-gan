@@ -1,1 +1,5 @@
-# for now this file serves as a placeholder for the directory structure in git
+# ignore all the pickle files here onwards:
+*.pkl 
+
+# Because the coco_captions.pkl file is very small, I have forced to add it to git.
+# This will avoid recomputation of the preprocessing.
