@@ -1,6 +1,5 @@
 """ Script for processing the text data files """
 
-
 import common.data_processor as dp
 import argparse
 import pickle
@@ -28,8 +27,9 @@ def parse_arguments():
                         default=[], help="space separated names of txt files")
     parser.add_argument("--vocab_size", type=int, action="store",
                         default=25000, help="vocabulary size for the data")
-    parser.add_argument("--out_file", type=str, action="store", default="common/data.pkl",
-                        help="path of the output file. Default = common/data.pkl")
+    parser.add_argument("--out_file", type=str, action="store",
+                        default="common/processed_data/data.pkl",
+                        help="path of the output file. Default = common/processed_data/data.pkl")
 
     args = parser.parse_args()
 
@@ -76,4 +76,3 @@ def main(args):
 
 if __name__ == '__main__':
     main(parse_arguments())
-

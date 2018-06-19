@@ -1,5 +1,5 @@
 # ignore all the pickle files here onwards:
 *.pkl 
 
-# Because the coco_captions.pkl file is very small, I have forced to add it to git.
+# Because the common/processed_data/coco_captions.pkl file is very small, I have forced to add it to git.
 # This will avoid recomputation of the preprocessing.
